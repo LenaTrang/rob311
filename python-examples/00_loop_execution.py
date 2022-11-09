@@ -10,8 +10,7 @@ if __name__ == "__main__":
     t = 0.0
 
     # Print "ROB311 @UM-ROBOTICS" for 5 seconds @200Hz
-
-    # YOUR
-    # CODE 
-    # GOES 
-    # HERE
+while t<EXEC_TIME:
+    print("ROB311 @UM-ROBOTICS")
+    t += DT
+    time.sleep(DT)
