@@ -6,7 +6,16 @@ from threading import Thread
 from MBot.Messages.message_defs import mo_states_dtype, mo_cmds_dtype, mo_pid_params_dtype
 from MBot.SerialProtocol.protocol import SerialProtocol
 from DataLogger import dataLogger
+from rtplot import client
+from scipy.signal import butter, lfilter, filtfilt
+from simple_pid import PID
+from pyPS4Controller.controller import Controller
+import board
+import adafruit_dotstar as dotstar
+from enum import Enum
+from collections import deque
 
+import FIR as fir
 # ---------------------------------------------------------------------------
 """
 ROB 311 - Ball-bot Stability Controller Walkthrough [Kp]
@@ -31,6 +40,7 @@ import time
 from math import sqrt
 
 PRECISION_OF_SLEEP = 0.0001
+JOYSTICK_SCALE = 32767
 
 # Version of the SoftRealtimeLoop library
 __version__ = "1.0.0"
@@ -176,6 +186,79 @@ class SoftRealtimeLoop:
         self.ttarg += self.dt
         return self.t1 - self.t0
 
+class ROB311BTController(Controller):
+    def __init__(self, interface, connecting_using_ds4drv=False, event_definition=None, event_format=None):
+        super().__init__(interface, connecting_using_ds4drv, event_definition, event_format)
+
+        # ------------------------------------
+        # Declare required attributes/values 
+
+        # DEMO 1: Modifying Tz value with Triggers
+        self.tz_demo_1 = 0
+
+        # DEMO 2: Modifying Tz value with Right Thumbstick (UP/DOWN)
+        self.tz_demo_2 = 0.0
+
+        # DEMO 3: Modifying Tz value with Shoulder/Bumper Buttons
+        self.tz_demo_3 = 0
+
+        # ------------------------------------
+
+    # Continuous value with Triggers
+
+    def on_R2_press(self, value):
+        # Normalizing raw values from [-1.0, 1.0] to [0.0, 1.0]
+        self.tz_demo_1 = (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
+
+    def on_R2_release(self):
+        # Reset values
+        self.tz_demo_1 = 0.0
+
+    def on_L2_press(self, value):
+        # Normalizing raw values from [-1.0, 1.0] to [-1.0, 0.0]
+        self.tz_demo_1 = -1 * (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
+
+    def on_L2_release(self):
+        # Reset values
+        self.tz_demo_1 = 0.0
+
+    # ----------------------------------------
+    # Continuous value with Right Thumbstick (UP/DOWN)
+
+    def on_R3_up(self, value):
+        # Inverting y-axis value
+        self.tz_demo_2 = -1.0 * value/JOYSTICK_SCALE
+
+    def on_R3_down(self, value):
+        # Inverting y-axis value
+        self.tz_demo_2 = -1.0 * value/JOYSTICK_SCALE
+
+    def on_R3_y_at_rest(self):
+        self.tz_demo_2 = 0.0
+
+    # ----------------------------------------
+    # Integer tz_demo_3s
+
+    def on_R1_press(self):
+        print("R1 button pressed!")
+        self.tz_demo_3 += 1
+
+    def on_R1_release(self):
+        pass
+
+    def on_L1_press(self):
+        print("L1 button pressed!")
+        self.tz_demo_3 -= 1
+
+    def on_L1_release(self):
+        pass
+
+    # ----------------------------------------
+
+    def on_options_press(self):
+        print("Exiting PS4 controller thread.")
+        sys.exit()
+
 # ---------------------------------------------------------------------------
 
 def register_topics(ser_dev:SerialProtocol):
@@ -201,8 +284,10 @@ MAX_PLANAR_DUTY = 0.8
 
 KP_THETA_X = 10                                   # Adjust until the system balances
 KP_THETA_Y = 10                                   # Adjust until the system balances
-KD_THETA_X = 0.2
-KD_THETA_Y = 0.2
+KD_THETA_X = .1
+KD_THETA_Y = .1
+KI_THETA_X = 0#.025
+KI_THETA_Y = 0#.025
 
 # ---------------------------------------------------------------------------
 #############################################################################
@@ -224,6 +309,55 @@ J33 = J31
 J = np.array([[J11, J12, J13], [J21, J22, J23], [J31, J32, J33]])
 
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# LOWPASS FILTER PARAMETERS
+
+Fs = FREQ # Sampling rate in Hz
+Fc = 1.0 # Cut-off frequency of the filter in Hz
+
+Fn = Fc/Fs # Normalized equivalent of Fc
+N = 60 # Taps of the filter
+
+# ---------------------------------------------------------------------------
+# CREATING TWO OBJECTS OF THE FIR() CLASS FOR X AND Y AXES
+
+lowpass_filter_dphi_x = fir.FIR()
+lowpass_filter_dphi_x.lowpass(N, Fn)
+
+lowpass_filter_dphi_y = fir.FIR()
+lowpass_filter_dphi_y.lowpass(N, Fn)
+
+# ---------------------------------------------------------------------------
+# WEIGHTED AVERAGE FILTER PARAMETERS
+
+WMA_WEIGHTS = np.array([0.1, 0.3, 0.4, 0.8])
+
+WMA_WINDOW_SIZE = len(WMA_WEIGHTS)
+WMA_NORM = WMA_WEIGHTS/np.sum(WMA_WEIGHTS)
+
+# ---------------------------------------------------------------------------
+
+def wma_filter(wma_window):
+    return np.sum(WMA_NORM * wma_window)
+
+# ---------------------------------------------------------------------------
+
+def register_topics(ser_dev:SerialProtocol):
+    # Mo :: Commands, States
+    ser_dev.serializer_dict[101] = [lambda bytes: np.frombuffer(bytes, dtype=mo_cmds_dtype), lambda data: data.tobytes()]
+    ser_dev.serializer_dict[121] = [lambda bytes: np.frombuffer(bytes, dtype=mo_states_dtype), lambda data: data.tobytes()]
+
+def transform_w2b(m1, m2, m3):
+    """
+    Returns Phi attributes
+    """
+
+    x = 0.323899 * m2 - 0.323899 * m3
+    y = -0.374007 * m1 + 0.187003 * m2 + 0.187003 * m3
+    z = 0.187003 * m1 + 0.187003 * m2 + 0.187003 * m3
+
+    return x, y, z
 
 def compute_motor_torques(Tx, Ty, Tz):
     '''
@@ -284,17 +418,67 @@ def compute_phi(psi_1, psi_2, psi_3):
     # returns phi_x, phi_y, phi_z
     return phi[0][0], phi[1][0], phi[2][0]
 
+def transform_w2b(m1, m2, m3):
+    """
+    Returns Phi attributes
+    """
+
+    x = 0.323899 * m2 - 0.323899 * m3
+    y = -0.374007 * m1 + 0.187003 * m2 + 0.187003 * m3
+    z = 0.187003 * m1 + 0.187003 * m2 + 0.187003 * m3
+
+    return x, y, z
+
 if __name__ == "__main__":
     trial_num = int(input('Trial Number? '))
     filename = 'ROB311_Stability_Test_%i' % trial_num
     dl = dataLogger(filename + '.txt')
 
+    # --------------------------------------------------------
+    # RTPLOT INITIALIZATION ROUTINE
+
+    imu_states = {'names': ['Roll', 'Pitch'],
+                    'title': "Orientation",
+                    'ylabel': "rad",
+                    'xlabel': "time",
+                    'colors' : ["r", "g"],
+                    'line_width': [2]*2,
+                    'yrange': [-2.0 * np.pi, 2.0 * np.pi]
+                    }
+
+    ball_states = {'names': ['Phi', 'dPhi', 'ddPhi'],
+                    'title': "Ball States",
+                    'ylabel': "rad",
+                    'xlabel': "time",
+                    'colors' : ["r", "g", "b"],
+                    'line_width': [2]*3,
+                    }
+
+    stability_controller = {'names': ['P', 'I', 'D'],
+                    'title': "Stability Controller",
+                    'ylabel': "Terms",
+                    'xlabel': "time",
+                    'colors' : ["r", "g", "b"],
+                    'line_width': [2]*3,
+                    }
+
+    plot_config = [imu_states]
+    client.initialize_plots(plot_config)
+    rtplot_data = []
+
+    # --------------------------------------------------------
+    t_start = 0.0
     ser_dev = SerialProtocol()
     register_topics(ser_dev)
 
     # Init serial
     serial_read_thread = Thread(target = SerialProtocol.read_loop, args=(ser_dev,), daemon=True)
     serial_read_thread.start()
+
+    #ps4 thread
+    rob311_bt_controller = ROB311BTController(interface="/dev/input/js0")
+    rob311_bt_controller_thread = threading.Thread(target=rob311_bt_controller.listen, args=(10,))
+    rob311_bt_controller_thread.start()
 
     # Local structs
     commands = np.zeros(1, dtype=mo_cmds_dtype)[0]
@@ -303,6 +487,22 @@ if __name__ == "__main__":
     psi_1 = 0.0
     psi_2 = 0.0
     psi_3 = 0.0
+
+    # Local Structs from rtplot_demo
+    zeroed = False
+
+    psi = np.zeros((3, 1))
+    psi_offset = np.zeros((3, 1))
+
+    phi = np.zeros((3, 1))
+    prev_phi = phi
+
+    dpsi = np.zeros((3, 1))
+
+    dphi = np.zeros((3, 1))
+    prev_dphi = np.zeros((3, 1))
+
+    ddphi = np.zeros((3, 1))
 
     # Motor torques
     T1 = 0.0
@@ -318,6 +518,25 @@ if __name__ == "__main__":
     error_y = 0.0
 
     commands['kill'] = 0.0
+
+    # ---------------------------------------------------------------------------
+    # WMA FILTER VARIABLES
+
+    theta_x_window = deque(maxlen=WMA_WINDOW_SIZE) # A sliding window of values
+    theta_y_window = deque(maxlen=WMA_WINDOW_SIZE) # A sliding window of values
+
+    for _ in range(WMA_WINDOW_SIZE):
+        theta_x_window.append(0.0)
+        theta_y_window.append(0.0)
+
+    theta_x = 0.0 # Variable for the filtered value
+    theta_y = 0.0 # Variable for the filtered value
+
+    dphi_x = 0.0 # Variable for the filtered value
+    dphi_y = 0.0 # Variable for the filtered value
+
+    # ---------------------------------------------------------------------------
+
 
     # Time for comms to sync
     time.sleep(1.0)
@@ -338,6 +557,8 @@ if __name__ == "__main__":
                 t_start = time.time()
             i = i + 1
         except KeyError as e:
+            # Calibration: 10 seconds
+            print("<< CALIBRATING :: {:.2f} >>".format(t))
             continue
 
         t_now = time.time() - t_start
@@ -361,10 +582,10 @@ if __name__ == "__main__":
         # Compute motor torques (T1, T2, and T3) with Tx, Ty, and Tz
 
         # Proportional controller
-        Tx = KP_THETA_X * error_x - KD_THETA_X*(prev_error_x-error_x)/DT  # Lena: Added derivative term
-        Ty = KP_THETA_Y * error_y - KD_THETA_Y*(prev_error_y-error_y)/DT
+        Tx = KP_THETA_X * error_x - KD_THETA_X*(prev_error_x-error_x)/DT + KI_THETA_X*((prev_error_x+error_x)/2)*DT  # Lena: Added derivative term
+        Ty = KP_THETA_Y * error_y - KD_THETA_Y*(prev_error_y-error_y)/DT + KI_THETA_Y*((prev_error_y+error_y)/2)*DT
 
-        Tz = 0
+        Tz = rob311_bt_controller.tz_demo_1
 
         # ---------------------------------------------------------
         # Saturating the planar torques 
@@ -399,6 +620,81 @@ if __name__ == "__main__":
 
         prev_error_x = error_x
         prev_error_y = error_y
+
+        # Phi and dPhi calculation BELOW IS FROM RT_PLOT_DEMO
+        psi[0] = states['psi_1']
+        psi[1] = states['psi_2']
+        psi[2] = states['psi_3']
+
+        dpsi[0] = states['dpsi_1']
+        dpsi[1] = states['dpsi_2']
+        dpsi[2] = states['dpsi_3']
+
+        if not zeroed:
+            psi_offset = psi
+            zeroed = True
+
+        psi = psi - psi_offset
+
+        phi[0], phi[1], phi[2] = transform_w2b(psi[0], psi[1], psi[2])
+        dphi[0], dphi[1], dphi[2] = transform_w2b(dpsi[0], dpsi[1], dpsi[2])
+
+        # --------------------------------------------------------
+        # RTPLOT ACTIONS
+
+        rtplot_data = [states['theta_roll'], states['theta_pitch']]
+        client.send_array(rtplot_data)
+
+        # --------------------------------------------------------
+        # ???---------------------------------------------------------------------------
+        # Lowpass filtering velocities
+
+        dphi_x = lowpass_filter_dphi_x.filter(dphi[0][0])
+        dphi_y = lowpass_filter_dphi_y.filter(dphi[1][0])
+
+        # ---------------------------------------------------------------------------
+        # WMA filtering IMU values
+
+        theta_x_window.append(states['theta_roll'])
+        theta_y_window.append(states['theta_pitch'])
+
+        theta_x = wma_filter(theta_x_window)
+        theta_y = wma_filter(theta_y_window)
+
+        # ---------------------------------------------------------------------------
+        # 10 seconds of wait to set the bot on top of the ball
+
+        if t > 11.0 and t < 21.0:
+            print("<< PLACE THE BOT ON TOP OF THE BALL :: {:.2f} >>".format(t))
+        elif t > 21.0:
+            if not zeroed:
+                psi_offset = psi
+                zeroed = True
+
+        # ---------------------------------------------------------------------------
+        # Subtracting the initial values from the motor encoders to start at zero position
+
+        psi = psi - psi_offset
+
+        if zeroed:
+            if i == 0:
+                t_start = time.time()
+
+            i = i + 1
+            t_now = time.time() - t_start
+
+        ser_dev.send_topic_data(101, commands)
+
+        if zeroed:
+            print(" << Iteration no: {}, THETA X: {:.2f}, THETA Y: {:.2f} >>".format(i, theta_x, theta_y))
+            # Construct the data matrix for saving - you can add more variables by replicating the format below
+            data = [i] + [t_now] + \
+                [states['theta_roll']] + [states['theta_pitch']] + \
+                            [phi[0][0]] + [phi[1][0]] + [phi[2][0]] + \
+                                                    [dphi[0][0]] + [dphi[1][0]] + [dphi[2][0]] + \
+                                                        [theta_x] + [theta_y] + [dphi_x] + [dphi_y]
+
+            dl.appendData(data)
 
     
   

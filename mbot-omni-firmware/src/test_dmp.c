@@ -38,14 +38,15 @@ int main() {
     mb_mpu_config_t mpu_config = mb_mpu_default_config();
     mpu_config.i2c_bus = i2c;
     mpu_config.dmp_fetch_accel_gyro=1;
-    mpu_config.enable_magnetometer = 1;
+    mpu_config.enable_magnetometer = 0;
     mpu_config.read_mag_after_callback = 0;
     mpu_config.orient = ORIENTATION_Z_UP;
     mpu_config.dmp_sample_rate = 200;
-    //mb_mpu_reset_accel_cal(mpu_config.i2c_bus);
+    mb_mpu_reset_accel_cal(mpu_config.i2c_bus);
     mb_mpu_calibrate_gyro_routine(mpu_config);
-    //sleep_ms(2000);
-    //mb_mpu_calibrate_accel_routine(mpu_config);
+    
+    sleep_ms(2000);
+    mb_mpu_calibrate_accel_routine(mpu_config);
     sleep_ms(500);
     mb_mpu_initialize_dmp(&mpu_data, mpu_config);
     gpio_set_irq_enabled_with_callback(MB_MPU_INTERRUPT_GPIO, GPIO_IRQ_EDGE_FALL, true, &mb_dmp_callback);
