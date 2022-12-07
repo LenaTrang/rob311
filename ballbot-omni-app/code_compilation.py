@@ -615,7 +615,6 @@ if __name__ == "__main__":
         client.send_array(rtplot_data)
 
         # --------------------------------------------------------
-        # ???---------------------------------------------------------------------------
         # Lowpass filtering velocities
 
         dphi_x = lowpass_filter_dphi_x.filter(dphi[0][0])

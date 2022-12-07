@@ -5,7 +5,6 @@ import numpy as np
 from threading import Thread
 from MBot.Messages.message_defs import mo_states_dtype, mo_cmds_dtype, mo_pid_params_dtype
 from MBot.SerialProtocol.protocol import SerialProtocol
-from DataLogger import dataLogger
 from rtplot import client
 from scipy.signal import butter, lfilter, filtfilt
 from simple_pid import PID
@@ -14,11 +13,11 @@ import board
 import adafruit_dotstar as dotstar
 from enum import Enum
 from collections import deque
+from DataLogger import dataLogger
 
 import FIR as fir
-# ---------------------------------------------------------------------------
 """
-ROB 311 - Ball-bot Stability Controller Walkthrough [Kp]
+ROB 311 - Ball-bot steering demo
 
 This program uses a soft realtime loop to enforce loop timing. Soft real time loop is a  class
 designed to allow clean exits from infinite loops with the potential for post-loop cleanup operations executing.
@@ -40,7 +39,6 @@ import time
 from math import sqrt
 
 PRECISION_OF_SLEEP = 0.0001
-JOYSTICK_SCALE = 32767
 
 # Version of the SoftRealtimeLoop library
 __version__ = "1.0.0"
@@ -186,82 +184,7 @@ class SoftRealtimeLoop:
         self.ttarg += self.dt
         return self.t1 - self.t0
 
-class ROB311BTController(Controller):
-    def __init__(self, interface, connecting_using_ds4drv=False, event_definition=None, event_format=None):
-        super().__init__(interface, connecting_using_ds4drv, event_definition, event_format)
-
-        # ------------------------------------
-        # Declare required attributes/values 
-
-        # DEMO 1: Modifying Tz value with Triggers --Z axis rotation
-        self.tz_demo_1 = 0
-
-        # DEMO 2: Modifying Tz value with Right Thumbstick (UP/DOWN) --Steering
-        self.tx_demo_2 = 0.0
-        self.ty_demo_2 = 0.0
-
-        # DEMO 3: Modifying Tz value with Shoulder/Bumper Buttons
-        self.tz_demo_3 = 0
-
-        # ------------------------------------
-
-    # Continuous value with Triggers
-
-    def on_R2_press(self, value):
-        # Normalizing raw values from [-1.0, 1.0] to [0.0, 1.0]
-        self.tz_demo_1 = (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
-
-    def on_R2_release(self):
-        # Reset values
-        self.tz_demo_1 = 0.0
-
-    def on_L2_press(self, value):
-        # Normalizing raw values from [-1.0, 1.0] to [-1.0, 0.0]
-        self.tz_demo_1 = -1 * (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
-
-    def on_L2_release(self):
-        # Reset values
-        self.tz_demo_1 = 0.0
-
-    # ----------------------------------------
-    # Continuous value with Right Thumbstick (UP/DOWN)
-
-    def on_R3_up(self, value):
-        # Inverting y-axis value
-        self.tx_demo_2 = -1.0 * value/JOYSTICK_SCALE
-        self.ty_demo_2 = -1.0 * value/JOYSTICK_SCALE
-
-    def on_R3_down(self, value):
-        # Inverting y-axis value
-        self.tx_demo_2 = -1.0 * value/JOYSTICK_SCALE
-        self.ty_demo_2 = -1.0 * value/JOYSTICK_SCALE
-
-    def on_R3_y_at_rest(self):
-        self.tx_demo_2 = 0.0
-        self.ty_demo_2 = 0.0
-
-    # ----------------------------------------
-    # Integer tz_demo_3s
-
-    def on_R1_press(self):
-        print("R1 button pressed!")
-        self.tz_demo_3 += 1
-
-    def on_R1_release(self):
-        pass
-
-    def on_L1_press(self):
-        print("L1 button pressed!")
-        self.tz_demo_3 -= 1
-
-    def on_L1_release(self):
-        pass
-
-    # ----------------------------------------
-
-    def on_options_press(self):
-        print("Exiting PS4 controller thread.")
-        sys.exit()
+# ---------------------------------------------------------------------------
 
 class BBController(Controller):
     """
@@ -374,83 +297,30 @@ class BBController(Controller):
 
 # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-
-def register_topics(ser_dev:SerialProtocol):
-    ser_dev.serializer_dict[101] = [lambda bytes: np.frombuffer(bytes, dtype=mo_cmds_dtype), lambda data: data.tobytes()]
-    ser_dev.serializer_dict[121] = [lambda bytes: np.frombuffer(bytes, dtype=mo_states_dtype), lambda data: data.tobytes()]
-
-# ---------------------------------------------------------------------------
+JOYSTICK_SCALE = 32767
 
 FREQ = 200
 DT = 1/FREQ
 
-RW = 0.0048
+RW = 0.048
 RK = 0.1210
 ALPHA = np.deg2rad(45)
-
-MAX_PLANAR_DUTY = 0.8
-
-# ---------------------------------------------------------------------------
-###############  THESE WILL NEED TO BE CAREFULLY ADJUSTED ##################
-# --------------------------------------------------------------------------
-
-# Proportional gains for the stability controllers (X-Z and Y-Z plane)
-
-KP_THETA_X = 9                                   # Adjust until the system balances
-KP_THETA_Y = 9                                   # Adjust until the system balances
-KD_THETA_X = .1
-KD_THETA_Y = .1
-KI_THETA_X = 0#.025
-KI_THETA_Y = 0#.025
-
-# ---------------------------------------------------------------------------
-#############################################################################
-
-
-# Wheel rotation to Ball rotation transformation matrix
-J11 = 0
-J12 = -np.sqrt(3) * RW/ (3 * RK * np.cos(ALPHA))
-J13 = -1 * J12
-
-J21 = -2 * RW/(3 * RK * np.cos(ALPHA))
-J22 = RW / (3 * RK * np.cos(ALPHA))
-J23 = J22
-
-J31 = RW / (3 * RK * np.sin(ALPHA))
-J32 = J31
-J33 = J31
-
-J = np.array([[J11, J12, J13], [J21, J22, J23], [J31, J32, J33]])
-
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# LOWPASS FILTER PARAMETERS
+MK = 0.62369
+IK = 0.00365
 
 Fs = FREQ # Sampling rate in Hz
-Fc = .8#1.0 # Cut-off frequency of the filter in Hz
+Fc = 0.8 # Cut-off frequency of the filter in Hz
 
 Fn = Fc/Fs # Normalized equivalent of Fc
-N = 100#60 # Taps of the filter
+N = 100 # Taps of the filter
 
 # ---------------------------------------------------------------------------
-# CREATING TWO OBJECTS OF THE FIR() CLASS FOR X AND Y AXES
 
 lowpass_filter_dphi_x = fir.FIR()
 lowpass_filter_dphi_x.lowpass(N, Fn)
 
 lowpass_filter_dphi_y = fir.FIR()
 lowpass_filter_dphi_y.lowpass(N, Fn)
-
-# ---------------------------------------------------------------------------
-# WEIGHTED AVERAGE FILTER PARAMETERS
-
-#WMA_WEIGHTS = np.array([0.1, 0.3, 0.4, 0.8])
-WMA_WEIGHTS = np.array([20, 40, 60, 80])
-
-WMA_WINDOW_SIZE = len(WMA_WEIGHTS)
-WMA_NORM = WMA_WEIGHTS/np.sum(WMA_WEIGHTS)
 
 MAX_THETA = np.deg2rad(4) # Maximum lean angle: 4 degrees
 
@@ -481,12 +351,12 @@ MIN_THETA_KP = 7.0
 MAX_THETA_KD = 2.0
 MIN_THETA_KD = -2.0
 
-# ---------------------------------------------------------------------------
+WMA_WEIGHTS = np.array([20, 40, 60, 80])
+WMA_WINDOW_SIZE = len(WMA_WEIGHTS)
+WMA_NORM = WMA_WEIGHTS/np.sum(WMA_WEIGHTS)
 
 def wma_filter(wma_window):
     return np.sum(WMA_NORM * wma_window)
-
-# ---------------------------------------------------------------------------
 
 def register_topics(ser_dev:SerialProtocol):
     # Mo :: Commands, States
@@ -504,79 +374,10 @@ def transform_w2b(m1, m2, m3):
 
     return x, y, z
 
-def compute_motor_torques(Tx, Ty, Tz):
-    '''
-    Parameters:
-    ----------
-    Tx: Torque along x-axis
-    Ty: Torque along y-axis
-    Tz: Torque along z-axis
-
-    Returns:
-    --------
-            Ty
-            T1
-            |
-            |
-            |
-            . _ _ _ _ Tx
-           / \
-          /   \
-         /     \
-        /       \
-       T2       T3
-
-    T1: Motor Torque 1
-    T2: Motor Torque 2
-    T3: Motor Torque 3
-    '''
-
-    T1 = (-0.3333) * (Tz - (2.8284 * Ty))
-    T2 = (-0.3333) * (Tz + (1.4142 * (Ty + 1.7320 * Tx)))
-    T3 = (-0.3333) * (Tz + (1.4142 * (Ty - 1.7320 * Tx)))
-
-    return T1, T2, T3
-
-# ---------------------------------------------------------------------------
-
-def compute_phi(psi_1, psi_2, psi_3):
-    '''
-    Parameters:
-    ----------
-    psi_1: Encoder rotation (rad) [MOTOR 1]
-    psi_2: Encoder rotation (rad) [MOTOR 2]
-    psi_3: Encoder rotation (rad) [MOTOR 3]
-
-    Returns:
-    --------
-    phi_x: Ball rotation along x-axis (rad)
-    phi_y: Ball rotation along y-axis (rad)
-    phi_z: Ball rotation along z-axis (rad)
-    '''
-
-    # Converting counts to rad
-    psi = np.array([[psi_1], [psi_2], [psi_3]])
-
-    # phi = J [3x3] * psi [3x1]
-    phi = np.matmul(J, psi)
-
-    # returns phi_x, phi_y, phi_z
-    return phi[0][0], phi[1][0], phi[2][0]
-
-def transform_w2b(m1, m2, m3):
-    """
-    Returns Phi attributes
-    """
-
-    x = 0.323899 * m2 - 0.323899 * m3
-    y = -0.374007 * m1 + 0.187003 * m2 + 0.187003 * m3
-    z = 0.187003 * m1 + 0.187003 * m2 + 0.187003 * m3
-
-    return x, y, z
-
 if __name__ == "__main__":
+
     trial_num = int(input('Trial Number? '))
-    filename = 'ROB311_Stability_Test_%i' % trial_num
+    filename = 'ROB311_Velocity_Test_%i' % trial_num
     dl = dataLogger(filename + '.txt')
 
     # --------------------------------------------------------
@@ -612,7 +413,9 @@ if __name__ == "__main__":
     rtplot_data = []
 
     # --------------------------------------------------------
+
     t_start = 0.0
+
     ser_dev = SerialProtocol()
     register_topics(ser_dev)
 
@@ -620,20 +423,11 @@ if __name__ == "__main__":
     serial_read_thread = Thread(target = SerialProtocol.read_loop, args=(ser_dev,), daemon=True)
     serial_read_thread.start()
 
-    #ps4 thread
-    rob311_bt_controller = ROB311BTController(interface="/dev/input/js0")
-    rob311_bt_controller_thread = threading.Thread(target=rob311_bt_controller.listen, args=(10,))
-    rob311_bt_controller_thread.start()
-
     # Local structs
     commands = np.zeros(1, dtype=mo_cmds_dtype)[0]
     states = np.zeros(1, dtype=mo_states_dtype)[0]
 
-    psi_1 = 0.0
-    psi_2 = 0.0
-    psi_3 = 0.0
-
-    # Local Structs from rtplot_demo
+    commands['kill'] = 0.0
     zeroed = False
 
     psi = np.zeros((3, 1))
@@ -642,6 +436,12 @@ if __name__ == "__main__":
     phi = np.zeros((3, 1))
     prev_phi = phi
 
+    theta_x = 0.0 # filtered
+    theta_y = 0.0 # filtered
+
+    dphi_x = 0.0 # filtered
+    dphi_y = 0.0 # filtered
+
     dpsi = np.zeros((3, 1))
 
     dphi = np.zeros((3, 1))
@@ -649,27 +449,7 @@ if __name__ == "__main__":
 
     ddphi = np.zeros((3, 1))
 
-    # Motor torques
-    T1 = 0.0
-    T2 = 0.0
-    T3 = 0.0
-
-    # Desired theta
-    desired_theta_x = 0.0
-    desired_theta_y = 0.0
-
-    # Desired velocity = derivative of measured theta? which is psi
-
-
-    # Error in theta
-    error_x = 0.0
-    error_y = 0.0
-
-    commands['kill'] = 0.0
-
-    # ---------------------------------------------------------------------------
-    # WMA FILTER VARIABLES
-
+    # deque is a data structure that automatically pops the previous data based on its max length.
     theta_x_window = deque(maxlen=WMA_WINDOW_SIZE) # A sliding window of values
     theta_y_window = deque(maxlen=WMA_WINDOW_SIZE) # A sliding window of values
 
@@ -677,106 +457,72 @@ if __name__ == "__main__":
         theta_x_window.append(0.0)
         theta_y_window.append(0.0)
 
-    theta_x = 0.0 # Variable for the filtered value
-    theta_y = 0.0 # Variable for the filtered value
+    theta_roll_pid_components = np.array([9, 0.75, 0.1])
+    theta_pitch_pid_components = np.array([9, 0.75, 0.1])
 
-    dphi_x = 0.0 # Variable for the filtered value
-    dphi_y = 0.0 # Variable for the filtered value
+    phi_roll_pid_components = np.array([9.0, 0.75, 0.0])
+    phi_pitch_pid_components = np.array([9.0, 0.75, 0.0])
 
-    # ---------------------------------------------------------------------------
+    # Net Tx, Ty, and Tz 
+    Tx = 0.0
+    Ty = 0.0
+    Tz = 0.0
 
+    # Steering controller torques: Tx_e, Ty_e, and Tz_e
+    Tx_e = 0.0
+    Ty_e = 0.0
+    Tz_e = 0.0
+
+    # T1, T2, and T3
+    T1 = 0.0
+    T2 = 0.0
+    T3 = 0.0
 
     # Time for comms to sync
     time.sleep(1.0)
 
+    # Send the gains 
     ser_dev.send_topic_data(101, commands)
 
-    print('Beginning program!')
+    theta_roll_sp = 0.0
+    theta_pitch_sp = 0.0
+
+    phi_roll_sp = 0.0
+    phi_pitch_sp = 0.0
+    
+    # Initializing PID classes for the stability controller (along x|roll and y|pitch).
+    theta_roll_pid = PID(ROLL_THETA_KP, ROLL_THETA_KI, ROLL_THETA_KD, theta_roll_sp)
+    theta_pitch_pid = PID(PITCH_THETA_KP, PITCH_THETA_KI, PITCH_THETA_KD, theta_pitch_sp)
+
+    theta_roll_pid.output_limits = (-MAX_STA_DUTY, MAX_STA_DUTY)
+    theta_pitch_pid.output_limits = (-MAX_STA_DUTY, MAX_STA_DUTY)
+
+    # Initializing PID classes for the steering controller (along x|roll and y|pitch).
+    phi_roll_pid = PID(PHI_KP, PHI_KI, PHI_KD, phi_roll_sp)
+    phi_pitch_pid = PID(PHI_KP, PHI_KI, PHI_KD, phi_pitch_sp)
+
+    phi_roll_pid.output_limits = (-MAX_VEL_DUTY, MAX_VEL_DUTY)
+    phi_pitch_pid.output_limits = (-MAX_VEL_DUTY, MAX_VEL_DUTY)
+    
+    print('Starting the controller!')
     i = 0
 
-    # student edits (PID controller past values)
-    prev_error_x = 0
-    prev_error_y = 0
+    # This thread runs in parallel to the main controller loop and listens for any PS4 input
+    bb_controller = BBController(interface="/dev/input/js0", connecting_using_ds4drv=False)
+    bb_controller_thread = threading.Thread(target=bb_controller.listen, args=(10,))
+    bb_controller_thread.start()
 
     for t in SoftRealtimeLoop(dt=DT, report=True):
+
         try:
             states = ser_dev.get_cur_topic_data(121)[0]
-            if i == 0:
-                t_start = time.time()
-            i = i + 1
+
         except KeyError as e:
             # Calibration: 10 seconds
             print("<< CALIBRATING :: {:.2f} >>".format(t))
             continue
 
-        t_now = time.time() - t_start
-
-        # Define variables for saving / analysis here - below you can create variables from the available states in message_defs.py
-        
-        # Motor rotations
-        psi_1 = states['psi_1']
-        psi_2 = states['psi_2']
-        psi_3 = states['psi_3']
-
-        # Body lean angles
-        theta_x = (states['theta_roll'])
-        theta_y = (states['theta_pitch'])
-
-        # Body velocity (derivative of above)
-        velocity_x = ()
-        velocity_y = ()
-
-        # Controller error terms
-        error_x = desired_theta_x - theta_x
-        error_y = desired_theta_y - theta_y
-
-        error_x_vel = desired_x_vel - velocity_x
-        error_y_vel = desired_y_vel - velocity_y
-
-        # ---------------------------------------------------------
-        # Compute motor torques (T1, T2, and T3) with Tx, Ty, and Tz
-
-        # Proportional controller
-        Tx = 0.6*(KP_THETA_X * error_x - KD_THETA_X*(prev_error_x-error_x)/DT + KI_THETA_X*((prev_error_x+error_x)/2)*DT) + 0.4*(rob311_bt_controller.tx_demo_2) # Lena: Added derivative term
-        Ty = 0.6*(KP_THETA_Y * error_y - KD_THETA_Y*(prev_error_y-error_y)/DT + KI_THETA_Y*((prev_error_y+error_y)/2)*DT) + 0.4*(rob311_bt_controller.ty_demo_2)
-
-        Tz = rob311_bt_controller.tz_demo_1 
-
-        # ---------------------------------------------------------
-        # Saturating the planar torques 
-        # This keeps the system having the correct torque balance across the wheels in the face of saturation of any motor during the conversion from planar torques to M1-M3
-        if np.abs(Tx) > MAX_PLANAR_DUTY:
-            Tx = np.sign(Tx) * MAX_PLANAR_DUTY
-
-        if np.abs(Ty) > MAX_PLANAR_DUTY:
-            Ty = np.sign(Ty) * MAX_PLANAR_DUTY
-
-        # ---------------------------------------------------------
-
-        T1, T2, T3 = compute_motor_torques(Tx, Ty, Tz)
-
-        # ---------------------------------------------------------
-
-        phi_x, phi_y, phi_z = compute_phi(psi_1, psi_2, psi_3)
-
-        # ---------------------------------------------------------
-
-        print("Iteration no. {}, T1: {:.2f}, T2: {:.2f}, T3: {:.2f}".format(i, T1, T2, T3))
-        commands['motor_1_duty'] = T1
-        commands['motor_2_duty'] = T2
-        commands['motor_3_duty'] = T3  
-
-        # Construct the data matrix for saving - you can add more variables by replicating the format below
-        data = [i] + [t_now] + [theta_x] + [theta_y] + [T1] + [T2] + [T3] + [phi_x] + [phi_y] + [phi_z] + [psi_1] + [psi_2] + [psi_3]
-        dl.appendData(data)
-
-        print("Iteration no. {}, THETA X: {:.2f}, THETA Y: {:.2f}".format(i, theta_x, theta_y))
-        ser_dev.send_topic_data(101, commands) # Send motor torques
-
-        prev_error_x = error_x
-        prev_error_y = error_y
-
-        # Phi and dPhi calculation BELOW IS FROM RT_PLOT_DEMO
+        # Data from the Pico
         psi[0] = states['psi_1']
         psi[1] = states['psi_2']
         psi[2] = states['psi_3']
@@ -785,51 +531,41 @@ if __name__ == "__main__":
         dpsi[1] = states['dpsi_2']
         dpsi[2] = states['dpsi_3']
 
-        if not zeroed:
-            psi_offset = psi
-            zeroed = True
-
-        psi = psi - psi_offset
-
-        phi[0], phi[1], phi[2] = transform_w2b(psi[0], psi[1], psi[2])
-        dphi[0], dphi[1], dphi[2] = transform_w2b(dpsi[0], dpsi[1], dpsi[2])
-
-        # --------------------------------------------------------
-        # RTPLOT ACTIONS
-
-        rtplot_data = [states['theta_roll'], states['theta_pitch']]
-        client.send_array(rtplot_data)
-
-        # --------------------------------------------------------
-        # ???---------------------------------------------------------------------------
-        # Lowpass filtering velocities
-
-        dphi_x = lowpass_filter_dphi_x.filter(dphi[0][0])
-        dphi_y = lowpass_filter_dphi_y.filter(dphi[1][0])
-
-        # ---------------------------------------------------------------------------
-        # WMA filtering IMU values
-
+        # A sliding window of "WMA_WINDOW_SIZE" values for the WMA filter
         theta_x_window.append(states['theta_roll'])
         theta_y_window.append(states['theta_pitch'])
 
+        # Applying a WMA filter on the IMU values
         theta_x = wma_filter(theta_x_window)
         theta_y = wma_filter(theta_y_window)
 
-        # ---------------------------------------------------------------------------
-        # 10 seconds of wait to set the bot on top of the ball
-
+        # A ten second wait to place the bot on top of the ball--this is to 
+        # reset the encoder values so that at i=0, the ball-bot's position is (0, 0)
         if t > 11.0 and t < 21.0:
             print("<< PLACE THE BOT ON TOP OF THE BALL :: {:.2f} >>".format(t))
+        ####################################
+        if t > 11.0 and t < 15:    
+            # Make the current angle for the ballbot the set point
+            theta_roll_pid.setpoint = states['theta_roll']
+            theta_pitch_pid.setpoint = states['theta_pitch']
+            phi_roll_pid.setpoint = states['phi_roll']
+            phi_pitch_pid.setpoint = states['phi_pitch']
+
+        
         elif t > 21.0:
             if not zeroed:
                 psi_offset = psi
                 zeroed = True
 
-        # ---------------------------------------------------------------------------
-        # Subtracting the initial values from the motor encoders to start at zero position
-
         psi = psi - psi_offset
+
+        # Transforming wheel attributes (position and velocity) to ball attributes.
+        phi[0], phi[1], phi[2] = transform_w2b(psi[0], psi[1], psi[2])
+        dphi[0], dphi[1], dphi[2] = transform_w2b(dpsi[0], dpsi[1], dpsi[2])
+
+        # Lowpass filtering the ball-velocity estimates
+        dphi_x = lowpass_filter_dphi_x.filter(dphi[0][0])
+        dphi_y = lowpass_filter_dphi_y.filter(dphi[1][0])
 
         if zeroed:
             if i == 0:
@@ -838,22 +574,84 @@ if __name__ == "__main__":
             i = i + 1
             t_now = time.time() - t_start
 
+        # Start the steering controller if there is a change in the 
+        # ball-velocity setpoint using the PS4 controller.
+        if np.abs(bb_controller.dphi_y_sp) > DPHI_DEADBAND:
+            phi_pitch_pid.setpoint = bb_controller.dphi_y_sp
+            phi_roll_pid.setpoint = 0.0
+
+            Tx_e = phi_roll_pid(dphi_x)
+            Ty_e = phi_pitch_pid(dphi_y)
+
+        # Also start the steering controller if the ball-velocity is greater than
+        # DPHI_DEADBAND (0.5 rad/sec) to prevent the ball-bot from drifting
+        elif np.abs(dphi_x) > DPHI_DEADBAND or np.abs(dphi_y) > DPHI_DEADBAND:
+            phi_roll_pid.setpoint = 0.0
+            phi_pitch_pid.setpoint = 0.0
+
+            Tx_e = phi_roll_pid(dphi_x)
+            Ty_e = phi_pitch_pid(dphi_y)
+
+        else:
+            Tx_e = 0.0
+            Ty_e = 0.0
+
+        # Max Lean angle (Theta) constraint: If theta is greater than the maximum lean angle 
+        # (4 degrees) for our ball-bot, then turn off the steering controller.
+        if np.abs(theta_x) > MAX_THETA or np.abs(theta_y) > MAX_THETA:
+            Tx_e = 0.0
+            Ty_e = 0.0
+
+        # Summation of planar torques
+        # Stability controller + Steering controller
+        Tx = theta_roll_pid(theta_x) + Tx_e
+        Ty = theta_pitch_pid(theta_y) + Ty_e
+        Tz = bb_controller.Tz
+
+        # Conversion of planar torques to motor torques
+        T1 = (-0.3333) * (Tz - (2.8284 * Ty))
+        T2 = (-0.3333) * (Tz + (1.4142 * (Ty + 1.7320 * Tx)))
+        T3 = (-0.3333) * (Tz + (1.4142 * (Ty - 1.7320 * Tx)))
+
+        # Sending motor torque commands to the pico
+        commands['motor_1_duty'] = T1
+        commands['motor_2_duty'] = T2
+        commands['motor_3_duty'] = T3
+
+        # 
+        theta_roll_pid_components[0], theta_roll_pid_components[1], theta_roll_pid_components[2] = theta_roll_pid.components
+        theta_pitch_pid_components[0], theta_pitch_pid_components[1], theta_pitch_pid_components[2] = theta_pitch_pid.components
+
+        phi_roll_pid_components[0], phi_roll_pid_components[1], phi_roll_pid_components[2] = phi_roll_pid.components
+        phi_pitch_pid_components[0], phi_pitch_pid_components[1], phi_pitch_pid_components[2] = phi_pitch_pid.components
+
         ser_dev.send_topic_data(101, commands)
 
+        # --------------------------------------------------------
+        # RTPLOT ACTIONS
+
+        rtplot_data = [states['theta_roll'], states['theta_pitch']]
+        client.send_array(rtplot_data)
+        # --------------------------------------------------------
+
         if zeroed:
-            print(" << Iteration no: {}, THETA X: {:.2f}, THETA Y: {:.2f} >>".format(i, theta_x, theta_y))
+            print(" << Iteration no: {}, DPHI X: {:.2f}, DPHI Y: {:.2f} >>".format(i, dphi[0][0], dphi[1][0]))
             # Construct the data matrix for saving - you can add more variables by replicating the format below
             data = [i] + [t_now] + \
                 [states['theta_roll']] + [states['theta_pitch']] + \
+                    [Tx] + [Ty] + [Tz] + \
+                        [T1] + [T2] + [T3] + \
                             [phi[0][0]] + [phi[1][0]] + [phi[2][0]] + \
+                                [psi[0][0]] + [psi[1][0]] + [psi[2][0]] + \
+                                    [theta_roll_pid_components[0]] + [theta_roll_pid_components[1]] + [theta_roll_pid_components[2]] + \
+                                        [theta_pitch_pid_components[0]] + [theta_pitch_pid_components[1]] + [theta_pitch_pid_components[2]] + \
+                                            [phi_roll_pid_components[0]] + [phi_roll_pid_components[1]] + [phi_roll_pid_components[2]] + \
+                                                [phi_pitch_pid_components[0]] + [phi_pitch_pid_components[1]] + [phi_pitch_pid_components[2]] + \
                                                     [dphi[0][0]] + [dphi[1][0]] + [dphi[2][0]] + \
-                                                        [theta_x] + [theta_y] + [dphi_x] + [dphi_y]
+                                                        [dphi_x] + [dphi_y] + [theta_x] + [theta_y] + \
+                                                            [Tx_e] + [Ty_e]
 
             dl.appendData(data)
-
-    
-  
-    dl.writeOut()
 
     print("Resetting Motor commands.")
     time.sleep(0.25)
@@ -866,3 +664,4 @@ if __name__ == "__main__":
     ser_dev.send_topic_data(101, commands)
     time.sleep(0.25)
 
+    dl.writeOut()

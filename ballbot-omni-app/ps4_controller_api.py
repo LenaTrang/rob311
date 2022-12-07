@@ -179,11 +179,12 @@ class ROB311BTController(Controller):
         # ------------------------------------
         # Declare required attributes/values 
 
-        # DEMO 1: Modifying Tz value with Triggers
+        # DEMO 1: Modifying Tz value with Triggers --> z-axis control
         self.tz_demo_1 = 2.0
 
-        # DEMO 2: Modifying Tz value with Right Thumbstick (UP/DOWN)
-        self.tz_demo_2 = 0.0
+        # DEMO 2: Modifying Tz value with Right Thumbstick (UP/DOWN) --> steering control
+        self.tx_demo_2 = 0.0
+        self.ty_demo_2 = 0.0
 
         # DEMO 3: Modifying Tz value with Shoulder/Bumper Buttons
         self.tz_demo_3 = 0
@@ -213,14 +214,17 @@ class ROB311BTController(Controller):
 
     def on_R3_up(self, value):
         # Inverting y-axis value
-        self.tz_demo_2 = -1.0 * value/JOYSTICK_SCALE
+        self.tx_demo_2 = -1.0 * value/JOYSTICK_SCALE
+        self.ty_demo_2 = -1.0 * value/JOYSTICK_SCALE
 
     def on_R3_down(self, value):
         # Inverting y-axis value
-        self.tz_demo_2 = -1.0 * value/JOYSTICK_SCALE
+        self.tx_demo_2 = -1.0 * value/JOYSTICK_SCALE
+        self.ty_demo_2 = -1.0 * value/JOYSTICK_SCALE
 
     def on_R3_y_at_rest(self):
-        self.tz_demo_2 = 0.0
+        self.tx_demo_2 = 0.0
+        self.ty_demo_2 = 0.0
 
     # ----------------------------------------
     # Integer tz_demo_3s
@@ -265,6 +269,7 @@ if __name__ == "__main__":
     for t in SoftRealtimeLoop(dt=DT, report=True):
         print("\n\nTz Demo 1: {}\nTz Demo 2: {}\nTz Demo 3: {}\n\n".format(
             rob311_bt_controller.tz_demo_1,
-            rob311_bt_controller.tz_demo_2,
+            rob311_bt_controller.tx_demo_2,
+            rob311_bt_controller.ty_demo_2,
             rob311_bt_controller.tz_demo_3
         ))
