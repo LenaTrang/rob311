@@ -328,22 +328,22 @@ MAX_THETA = np.deg2rad(4) # Maximum lean angle: 4 degrees
 MAX_STA_DUTY = 0.6
 MAX_VEL_DUTY = 0.4
 
-MAX_DPHI = 4.0 # rad/sec
+MAX_DPHI = 10.0 # rad/sec
 MAX_DDPHI = 40.0 # rad/sec^2
 
 DPHI_DEADBAND = 0.5 # rad/sec
 
-ROLL_THETA_KP = 9.0
-ROLL_THETA_KI = 0.0
-ROLL_THETA_KD = 0.05
+ROLL_THETA_KP = 7.5
+ROLL_THETA_KI = 0.15
+ROLL_THETA_KD = 0.1
 
-PITCH_THETA_KP = 9.0
-PITCH_THETA_KI = 0.0
-PITCH_THETA_KD = 0.05
+PITCH_THETA_KP = 8.5
+PITCH_THETA_KI = 0.15
+PITCH_THETA_KD = 0.1
 
-PHI_KP = 0.5
-PHI_KI = 0.0
-PHI_KD = 0.0
+PHI_KP = 0.4
+PHI_KI = 0.2
+PHI_KD = 0.01
 
 MAX_THETA_KP = 16.0
 MIN_THETA_KP = 7.0
@@ -457,11 +457,13 @@ if __name__ == "__main__":
         theta_x_window.append(0.0)
         theta_y_window.append(0.0)
 
-    theta_roll_pid_components = np.array([9, 0.75, 0.1])
-    theta_pitch_pid_components = np.array([9, 0.75, 0.1])
+#9, 1, 0.1
+    theta_roll_pid_components = np.array([0.0, 0.0, 0.0])
+    theta_pitch_pid_components = np.array([0.0, 0.0, 0.0])
 
-    phi_roll_pid_components = np.array([9.0, 0.75, 0.0])
-    phi_pitch_pid_components = np.array([9.0, 0.75, 0.0])
+#9.0, 0.75, 0.0
+    phi_roll_pid_components = np.array([0.0, 0.0, 0.0])
+    phi_pitch_pid_components = np.array([0.0, 0.0, 0.0])
 
     # Net Tx, Ty, and Tz 
     Tx = 0.0
@@ -544,14 +546,11 @@ if __name__ == "__main__":
         if t > 11.0 and t < 21.0:
             print("<< PLACE THE BOT ON TOP OF THE BALL :: {:.2f} >>".format(t))
         ####################################
-        if t > 11.0 and t < 15:    
-            # Make the current angle for the ballbot the set point
-            theta_roll_pid.setpoint = states['theta_roll']
-            theta_pitch_pid.setpoint = states['theta_pitch']
-            phi_roll_pid.setpoint = states['phi_roll']
-            phi_pitch_pid.setpoint = states['phi_pitch']
-
-        
+        # if t > 11.0 and t < 15:    
+        #     # Make the current angle for the ballbot the set point
+        #     theta_roll_pid.setpoint = theta_x
+        #     theta_pitch_pid.setpoint = theta_y
+        ####################################        
         elif t > 21.0:
             if not zeroed:
                 psi_offset = psi
@@ -592,6 +591,14 @@ if __name__ == "__main__":
             Tx_e = phi_roll_pid(dphi_x)
             Ty_e = phi_pitch_pid(dphi_y)
 
+         # Also start the steering controller if the commands from the controller is
+         # less than the deadband to prevent drift
+        elif np.abs(bb_controller.dphi_y_sp) < DPHI_DEADBAND:
+            phi_pitch_pid.setpoint = 0.0 # don't move
+            phi_roll_pid.setpoint = 0.0 # don't move
+
+            Tx_e = phi_roll_pid(dphi_x)
+            Ty_e = phi_pitch_pid(dphi_y)
         else:
             Tx_e = 0.0
             Ty_e = 0.0
@@ -601,6 +608,19 @@ if __name__ == "__main__":
         if np.abs(theta_x) > MAX_THETA or np.abs(theta_y) > MAX_THETA:
             Tx_e = 0.0
             Ty_e = 0.0
+
+        # Noise removal for aprox zero angle: If theta is almost equal to zero, less the 
+        # derivative constant for the pid loop. Else, let it be the original variable.
+        # theta_almost_zero_theshold = 0.25
+        # if theta_x < theta_almost_zero_theshold:
+        #     theta_roll_pid.Kd = 0
+        # else:
+        #     theta_roll_pid.Kd = ROLL_THETA_KD
+        # if theta_y < theta_almost_zero_theshold:
+        #     theta_pitch_pid.Kd = 0
+        # else:
+        #     theta_pitch_pid.Kd = ROLL_THETA_KD
+
 
         # Summation of planar torques
         # Stability controller + Steering controller
