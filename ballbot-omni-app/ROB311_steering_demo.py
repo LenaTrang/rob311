@@ -377,7 +377,7 @@ def transform_w2b(m1, m2, m3):
 if __name__ == "__main__":
 
     trial_num = int(input('Trial Number? '))
-    filename = 'ROB311_Velocity_Test_%i' % trial_num
+    filename = 'ROB311_Steering_Test_%i' % trial_num
     dl = dataLogger(filename + '.txt')
 
     # --------------------------------------------------------

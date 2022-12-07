@@ -228,9 +228,9 @@ class BBController(Controller):
     def on_R1_press(self):
         for i in range(0, self.MAX_ROTATION_ITER):
             self.Tz = self.MAX_TZ * np.sin(i)
-            time.sleep(DT)
+            #time.sleep(DT)
 
-        time.sleep(self.COOLDOWN)
+        #time.sleep(self.COOLDOWN)
     
     def on_R1_release(self):
         self.Tz = 0.0
@@ -650,26 +650,14 @@ if __name__ == "__main__":
         # --------------------------------------------------------
         # RTPLOT ACTIONS
 
-        rtplot_data = [ball_states['dPhi']]
+        rtplot_data = [states['theta_roll'], states['theta_pitch']]
         client.send_array(rtplot_data)
         # --------------------------------------------------------
 
         if zeroed:
             print(" << Iteration no: {}, DPHI X: {:.2f}, DPHI Y: {:.2f} >>".format(i, dphi[0][0], dphi[1][0]))
             # Construct the data matrix for saving - you can add more variables by replicating the format below
-            data = [i] + [t_now] + \
-                [states['theta_roll']] + [states['theta_pitch']] + \
-                    [Tx] + [Ty] + [Tz] + \
-                        [T1] + [T2] + [T3] + \
-                            [phi[0][0]] + [phi[1][0]] + [phi[2][0]] + \
-                                [psi[0][0]] + [psi[1][0]] + [psi[2][0]] + \
-                                    [theta_roll_pid_components[0]] + [theta_roll_pid_components[1]] + [theta_roll_pid_components[2]] + \
-                                        [theta_pitch_pid_components[0]] + [theta_pitch_pid_components[1]] + [theta_pitch_pid_components[2]] + \
-                                            [phi_roll_pid_components[0]] + [phi_roll_pid_components[1]] + [phi_roll_pid_components[2]] + \
-                                                [phi_pitch_pid_components[0]] + [phi_pitch_pid_components[1]] + [phi_pitch_pid_components[2]] + \
-                                                    [dphi[0][0]] + [dphi[1][0]] + [dphi[2][0]] + \
-                                                        [dphi_x] + [dphi_y] + [theta_x] + [theta_y] + \
-                                                            [Tx_e] + [Ty_e]
+            data = [i] + [t_now] + [dphi[2][0]] # z velocity
 
             dl.appendData(data)
 
