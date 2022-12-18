@@ -193,7 +193,7 @@ class BBController(Controller):
     def __init__(self, **kwargs):
         Controller.__init__(self, **kwargs)
         self.MAX_TZ = 0.5 # Nm
-        self.MAX_VELOCITY = 2.0 # rad/sec
+        self.MAX_VELOCITY = 0.85 # rad/sec
 
         self.DELTA_KP = 0.1
         self.DELTA_KD = 0.01
@@ -351,7 +351,7 @@ MAX_STA_DUTY = 0.6
 MAX_VEL_DUTY = 0.4
 
 MAX_DPHI = 10.0 # rad/sec
-MAX_DDPHI = 40.0 # rad/sec^2
+MAX_DDPHI = 40#40.0 # rad/sec^2
 
 DPHI_DEADBAND = 0.5 # rad/sec
 
@@ -363,8 +363,8 @@ PITCH_THETA_KP = 8.5
 PITCH_THETA_KI = 0.15
 PITCH_THETA_KD = 0.1
 
-PHI_KP = 0.4
-PHI_KI = 0.2
+PHI_KP = 0.4#0.4
+PHI_KI = 0.2#0.2
 PHI_KD = 0.01
 
 MAX_THETA_KP = 16.0

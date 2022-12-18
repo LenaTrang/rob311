@@ -193,7 +193,7 @@ class BBController(Controller):
     def __init__(self, **kwargs):
         Controller.__init__(self, **kwargs)
         self.MAX_TZ = 0.5 # Nm
-        self.MAX_VELOCITY = 0.85 # rad/sec
+        self.MAX_VELOCITY = 1.5#0.85 # rad/sec
 
         self.DELTA_KP = 0.1
         self.DELTA_KD = 0.01

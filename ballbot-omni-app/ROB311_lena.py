@@ -211,9 +211,13 @@ class BBController(Controller):
         self.COOLDOWN = 0.5
         self.MAX_ROTATION_ITER = int(self.MAX_ROTATION_TIME/DT)
 
+        self.cmd_theta_x = 0.0
+        self.cmd_dphi_x = 0.0
+
     ## RIGHT JOYSTICK
     # Move in negative x direction
     def on_R3_left(self, value):
+        # self.dphi_y_sp = -1.0 * self.MAX_VELOCITY * (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
         self.dphi_y_sp = -1.0 * self.MAX_VELOCITY * (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
 
     # Move in positve x direction
@@ -225,13 +229,31 @@ class BBController(Controller):
         self.dphi_y_sp = 0.0
 
     def on_L3_up(self, value):
-        self.dphi_x_sp = -1.0 * self.MAX_VELOCITY * (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
+        self.cmd_dphi_x = -1.0 * self.MAX_VELOCITY * (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
+        if self.cmd_dphi_x - DPHI_BUFFER < dphi_x < self.cmd_dphi_x + DPHI_BUFFER:
+            # if the velocity if correct, then keep the chassis on top
+            self.cmd_theta_x = 0.0
+        elif dphi_x < self.cmd_dphi_x:
+            # if the velocity is less than the commanded, tilt to the right (change dir or speed up)
+            self.cmd_theta_x = 1 # TODO: MAKE A PID FOR THIS
+        else:
+            # if the velocity is greater than the commanded, tilt to the left (slow down)
+            self.cmd_theta_x = -1 # TODO: MAKE A PID FOR THIS (SEE ABOVE)
 
     def on_L3_down(self, value):
-        self.dphi_x_sp = 1.0 * self.MAX_VELOCITY * (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
+        self.cmd_dphi_x = 1.0 * self.MAX_VELOCITY * (1.0 + np.abs(value/JOYSTICK_SCALE))/2.0
+        if self.cmd_dphi_x - DPHI_BUFFER < dphi_x < self.cmd_dphi_x + DPHI_BUFFER:
+            # if the velocity if correct, then keep the chassis on top
+            self.cmd_theta_x = 0.0
+        elif dphi_x < self.cmd_dphi_x:
+            # if the velocity is less than the commanded, tilt to the right (slow down)
+            self.cmd_theta_x = 1 # TODO: MAKE A PID FOR THIS (SEE ABOVE)
+        else:
+            # if the velocity is greater than the commanded, tilt to the left (change dir or speed up)
+            self.cmd_theta_x = -1 # TODO: MAKE A PID FOR THIS (SEE ABOVE)
 
     def on_L3_y_at_rest(self):
-        self.dphi_x_sp = 0.0
+        self.cmd_dphi_x = 0.0
 
     def on_R2_press(self, value):
         self.dphi_y_sp = 1.0 * self.MAX_VELOCITY * (1.0 + value/JOYSTICK_SCALE)/2.0
@@ -354,6 +376,9 @@ MAX_DPHI = 10.0 # rad/sec
 MAX_DDPHI = 40.0 # rad/sec^2
 
 DPHI_DEADBAND = 0.5 # rad/sec
+THETA_DEADBAND = 0.2 # rad
+THETA_BUFFER = 0.1 # rad
+DPHI_BUFFER = 0.25 # rad/sec
 
 ROLL_THETA_KP = 7.5
 ROLL_THETA_KI = 0.15
@@ -372,6 +397,11 @@ MIN_THETA_KP = 7.0
 
 MAX_THETA_KD = 2.0
 MIN_THETA_KD = -2.0
+
+THETA_ROLL_SP_DESIRED = 0.0
+THETA_PITCH_SP_DESIRED = 0.0
+
+
 
 WMA_WEIGHTS = np.array([20, 40, 60, 80])
 WMA_WINDOW_SIZE = len(WMA_WEIGHTS)
@@ -567,12 +597,6 @@ if __name__ == "__main__":
         # reset the encoder values so that at i=0, the ball-bot's position is (0, 0)
         if t > 11.0 and t < 21.0:
             print("<< PLACE THE BOT ON TOP OF THE BALL :: {:.2f} >>".format(t))
-        ####################################
-        # if t > 11.0 and t < 15:    
-        #     # Make the current angle for the ballbot the set point
-        #     theta_roll_pid.setpoint = theta_x
-        #     theta_pitch_pid.setpoint = theta_y
-        ####################################        
         elif t > 21.0:
             if not zeroed:
                 psi_offset = psi
@@ -595,60 +619,28 @@ if __name__ == "__main__":
             i = i + 1
             t_now = time.time() - t_start
 
-        # Start the steering controller if there is a change in the 
-        # ball-velocity setpoint using the PS4 controller.
-        if np.abs(bb_controller.dphi_y_sp) > DPHI_DEADBAND:
-            phi_pitch_pid.setpoint = bb_controller.dphi_y_sp
-            Ty_e = phi_pitch_pid(dphi_y)
-        if np.abs(bb_controller.dphi_x_sp) > DPHI_DEADBAND:
-            phi_roll_pid.setpoint = bb_controller.dphi_x_sp
-            Tx_e = phi_roll_pid(dphi_x)
+        
 
-        # Also start the steering controller if the ball-velocity is greater than
-        # DPHI_DEADBAND (0.5 rad/sec) to prevent the ball-bot from drifting
-        elif np.abs(dphi_x) > DPHI_DEADBAND or np.abs(dphi_y) > DPHI_DEADBAND:
-            phi_roll_pid.setpoint = 0.0
-            phi_pitch_pid.setpoint = 0.0
-
-            Tx_e = phi_roll_pid(dphi_x)
-            Ty_e = phi_pitch_pid(dphi_y)
-
-         # Also start the steering controller if the commands from the controller is
-         # less than the deadband to prevent drift
-        elif np.abs(bb_controller.dphi_y_sp) < DPHI_DEADBAND or np.abs(bb_controller.dphi_x_sp) < DPHI_DEADBAND:
-            if np.abs(bb_controller.dphi_y_sp) < DPHI_DEADBAND:
-                phi_pitch_pid.setpoint = 0.0 # don't move
-                Ty_e = phi_pitch_pid(dphi_y)
-            if np.abs(bb_controller.dphi_x_sp) < DPHI_DEADBAND:
-                phi_roll_pid.setpoint = 0.0 # don't move
-                Tx_e = phi_roll_pid(dphi_x)
-        else:
-            Tx_e = 0.0
-            Ty_e = 0.0
-
-        # Max Lean angle (Theta) constraint: If theta is greater than the maximum lean angle 
-        # (4 degrees) for our ball-bot, then turn off the steering controller.
-        if np.abs(theta_x) > MAX_THETA or np.abs(theta_y) > MAX_THETA:
-            Tx_e = 0.0
-            Ty_e = 0.0
-
-        # Noise removal for aprox zero angle: If theta is almost equal to zero, less the 
-        # derivative constant for the pid loop. Else, let it be the original variable.
-        # theta_almost_zero_theshold = 0.25
-        # if theta_x < theta_almost_zero_theshold:
-        #     theta_roll_pid.Kd = 0
-        # else:
-        #     theta_roll_pid.Kd = ROLL_THETA_KD
-        # if theta_y < theta_almost_zero_theshold:
-        #     theta_pitch_pid.Kd = 0
-        # else:
-        #     theta_pitch_pid.Kd = ROLL_THETA_KD
+        # Tilt control:
+        # right joystick: holonomic motion - with some velocity calculate from joystick value
+            # tilt until that velocity is reached
+            # when the velocity is reached, don't tilt the ball bot anymore
+            # how to stop... tilt the other direction??
+            # also how to convert between the torque and the angle?? --> PID loop it?
+            # for tilt control, choose a tilt that is the greatest acceptable... maybe <= 4 deg
+        # Buttons
+            # change the "desired" set point from the original one that was calibrated
+            # one button for x theta and one for y theta
+        # Filtering and oscillations
+            # add in some factor with the commands
+            # with tilt control, this is the angle we command it to go to because then we
+                # can just use our setpoint as our next value because of the lag
 
 
         # Summation of planar torques
-        # Stability controller + Steering controller
-        Tx = theta_roll_pid(theta_x) + Tx_e
-        Ty = theta_pitch_pid(theta_y) + Ty_e
+        # Move to reduce the error between the commanded theta and the actual theta
+        Tx = theta_roll_pid(bb_controller.cmd_theta_x-theta_x)
+        Ty = theta_pitch_pid(theta_y)
         Tz = bb_controller.Tz
 
         # Conversion of planar torques to motor torques
