@@ -220,11 +220,15 @@ class BBController(Controller):
         self.dphi_y_sp = 0.0
 
     def on_L2_press(self, value):
-        self.dphi_y_sp = -1.0 * self.MAX_VELOCITY * (1.0 + value/JOYSTICK_SCALE)/2.0
+        #self.dphi_y_sp = -1.0 * self.MAX_VELOCITY * (1.0 + value/JOYSTICK_SCALE)/2.0
+        theta_pitch_pid.setpoint = 0.15
+        print("tilting")
+
 
     def on_L2_release(self):
         # TODO: Release mechanism
-        self.dphi_y_sp = 0.0
+        # self.dphi_y_sp = 0.0
+        theta_pitch_pid.setpoint = 0
 
     def on_R1_press(self):
         for i in range(0, self.MAX_ROTATION_ITER):
@@ -594,12 +598,12 @@ if __name__ == "__main__":
 
          # Also start the steering controller if the commands from the controller is
          # less than the deadband to prevent drift
-        elif np.abs(bb_controller.dphi_y_sp) < DPHI_DEADBAND:
-             phi_pitch_pid.setpoint = 0.0 # don't move
-             phi_roll_pid.setpoint = 0.0 # don't move
+        # elif np.abs(bb_controller.dphi_y_sp) < DPHI_DEADBAND:
+        #      phi_pitch_pid.setpoint = 0.0 # don't move
+        #      phi_roll_pid.setpoint = 0.0 # don't move
 
-             Tx_e = phi_roll_pid(dphi_x)
-             Ty_e = phi_pitch_pid(dphi_y)
+        #      Tx_e = phi_roll_pid(dphi_x)
+        #      Ty_e = phi_pitch_pid(dphi_y)
         else:
              Tx_e = 0.0
              Ty_e = 0.0
@@ -625,8 +629,8 @@ if __name__ == "__main__":
 
         # Summation of planar torques
         # Stability controller + Steering controller
-        Tx = theta_roll_pid(theta_x) + Tx_e
-        Ty = theta_pitch_pid(theta_y) + Ty_e
+        Tx = theta_roll_pid(theta_x) #+ Tx_e
+        Ty = theta_pitch_pid(theta_y) #+ Ty_e
         Tz = bb_controller.Tz
 
         # Conversion of planar torques to motor torques
