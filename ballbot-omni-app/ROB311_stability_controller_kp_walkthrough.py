@@ -730,8 +730,6 @@ if __name__ == "__main__":
         error_x = desired_theta_x - theta_x
         error_y = desired_theta_y - theta_y
 
-        error_x_vel = desired_x_vel - velocity_x
-        error_y_vel = desired_y_vel - velocity_y
 
         # ---------------------------------------------------------
         # Compute motor torques (T1, T2, and T3) with Tx, Ty, and Tz

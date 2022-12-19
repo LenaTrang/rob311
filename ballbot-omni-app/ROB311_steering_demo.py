@@ -193,7 +193,7 @@ class BBController(Controller):
     def __init__(self, **kwargs):
         Controller.__init__(self, **kwargs)
         self.MAX_TZ = 0.5 # Nm
-        self.MAX_VELOCITY = 1.5#0.85 # rad/sec
+        self.MAX_VELOCITY = 1#0.85 # rad/sec
 
         self.DELTA_KP = 0.1
         self.DELTA_KD = 0.01
@@ -212,7 +212,8 @@ class BBController(Controller):
         self.MAX_ROTATION_ITER = int(self.MAX_ROTATION_TIME/DT)
 
     def on_R2_press(self, value):
-        self.dphi_y_sp = 1.0 * self.MAX_VELOCITY * (1.0 + value/JOYSTICK_SCALE)/2.0
+        # self.dphi_y_sp = 1.0 * self.MAX_VELOCITY * (1.0 + value/JOYSTICK_SCALE)/2.0
+        self.dphi_y_sp = 1.0 * self.MAX_VELOCITY
 
     def on_R2_release(self):
         # TODO: Release mechanism
@@ -343,7 +344,7 @@ PITCH_THETA_KD = 0.1
 
 PHI_KP = 0.4
 PHI_KI = 0.2
-PHI_KD = 0.01
+PHI_KD = 0.0
 
 MAX_THETA_KP = 16.0
 MIN_THETA_KP = 7.0
@@ -594,14 +595,14 @@ if __name__ == "__main__":
          # Also start the steering controller if the commands from the controller is
          # less than the deadband to prevent drift
         elif np.abs(bb_controller.dphi_y_sp) < DPHI_DEADBAND:
-            phi_pitch_pid.setpoint = 0.0 # don't move
-            phi_roll_pid.setpoint = 0.0 # don't move
+             phi_pitch_pid.setpoint = 0.0 # don't move
+             phi_roll_pid.setpoint = 0.0 # don't move
 
-            Tx_e = phi_roll_pid(dphi_x)
-            Ty_e = phi_pitch_pid(dphi_y)
+             Tx_e = phi_roll_pid(dphi_x)
+             Ty_e = phi_pitch_pid(dphi_y)
         else:
-            Tx_e = 0.0
-            Ty_e = 0.0
+             Tx_e = 0.0
+             Ty_e = 0.0
 
         # Max Lean angle (Theta) constraint: If theta is greater than the maximum lean angle 
         # (4 degrees) for our ball-bot, then turn off the steering controller.
@@ -669,7 +670,7 @@ if __name__ == "__main__":
                                                 [phi_pitch_pid_components[0]] + [phi_pitch_pid_components[1]] + [phi_pitch_pid_components[2]] + \
                                                     [dphi[0][0]] + [dphi[1][0]] + [dphi[2][0]] + \
                                                         [dphi_x] + [dphi_y] + [theta_x] + [theta_y] + \
-                                                            [Tx_e] + [Ty_e]
+                                                            [Tx_e] + [Ty_e] + [phi_pitch_pid.setpoint]
 
             dl.appendData(data)
 
